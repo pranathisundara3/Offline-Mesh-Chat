@@ -1,0 +1,337 @@
+// src/screens/PrivateChatScreen.tsx
+//
+// Private one-to-one chat screen.
+// Navigation target: stack route "PrivateChat", param { peer: Peer }.
+//
+// Uses usePrivateChat() — a lightweight hook that subscribes to the existing
+// BLE event stream without starting a second mesh session.
+
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
+import type { Message } from '../types/chat';
+import { usePrivateChat } from '../hooks/usePrivateChat';
+import * as Bridge from '../native/BitChatBridge';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'PrivateChat'>;
+
+// ── Message bubble ────────────────────────────────────────────────────────────
+
+function MessageBubble({
+  item,
+  myPeerId,
+}: {
+  item: Message;
+  myPeerId: string;
+}) {
+  const isOwn = item.senderId === myPeerId;
+  const time = new Date(item.timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return (
+    <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubblePeer]}>
+      <Text style={[styles.bubbleText, isOwn && styles.bubbleTextOwn]}>
+        {item.content}
+      </Text>
+      <Text style={[styles.bubbleTime, isOwn && styles.bubbleTimeOwn]}>
+        {time} 🔒
+      </Text>
+    </View>
+  );
+}
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
+
+export default function PrivateChatScreen({ route, navigation }: Props) {
+  const { peer } = route.params;
+
+  // Fetch our own peer ID once. Needed to distinguish sent vs received bubbles.
+  const [myPeerId, setMyPeerId] = useState('');
+  useEffect(() => {
+    Bridge.getMyPeerId().then(id => setMyPeerId(id)).catch(() => {});
+  }, []);
+
+  const { messages, sendMessage, isSending, clearMessages } = usePrivateChat({
+    peerId: peer.peerId,
+    myPeerId,
+  });
+
+  const [input, setInput] = useState('');
+  const listRef = useRef<FlatList>(null);
+
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || isSending || !peer.isConnected) return;
+    const text = input.trim();
+    setInput('');
+    try {
+      await sendMessage(text);
+      listRef.current?.scrollToEnd({ animated: true });
+    } catch {
+      Alert.alert('Send Failed', 'Could not deliver the message.');
+    }
+  }, [input, isSending, peer.isConnected, sendMessage]);
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#1a0533" />
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back to peer list">
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <Text style={styles.peerName} numberOfLines={1}>
+            {peer.nickname}
+          </Text>
+          <Text style={styles.peerMeta}>
+            {peer.isConnected ? '🟢 Connected' : '⚫ Offline'} ·{' '}
+            {peer.peerId.slice(0, 12)}…
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.menuBtn}
+          onPress={() =>
+            Alert.alert(
+              'Options',
+              undefined,
+              [
+                {
+                  text: '🗑️ Clear Chat',
+                  onPress: () =>
+                    Alert.alert(
+                      `Clear chat with ${peer.nickname}?`,
+                      'This will delete your local conversation history. It will not affect the other device.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Clear',
+                          style: 'destructive',
+                          onPress: clearMessages,
+                        },
+                      ],
+                    ),
+                },
+                { text: 'Cancel', style: 'cancel' },
+              ],
+            )
+          }
+          accessibilityLabel="Open options menu">
+          <Text style={styles.menuBtnText}>⋮</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Offline banner ────────────────────────────────────────────────── */}
+      {!peer.isConnected && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            ⚫ Peer is offline — messages cannot be delivered.
+          </Text>
+        </View>
+      )}
+
+      {/* ── Chat area + composer ─────────────────────────────────────────── */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+
+        {messages.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>🔒</Text>
+            <Text style={styles.emptyTitle}>Private channel open</Text>
+            <Text style={styles.emptySubtitle}>
+              Messages are delivered directly over Bluetooth.{'\n'}
+              Only you and {peer.nickname} can see them.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <MessageBubble item={item} myPeerId={myPeerId} />
+            )}
+            contentContainerStyle={styles.messageList}
+            onContentSizeChange={() =>
+              listRef.current?.scrollToEnd({ animated: true })
+            }
+          />
+        )}
+
+        {/* ── Composer ─────────────────────────────────────────────────── */}
+        <View style={styles.composer}>
+          <TextInput
+            style={styles.composerInput}
+            value={input}
+            onChangeText={setInput}
+            placeholder={
+              peer.isConnected
+                ? `Message ${peer.nickname}…`
+                : 'Peer is offline'
+            }
+            placeholderTextColor="#6b7280"
+            multiline
+            maxLength={1000}
+            returnKeyType="send"
+            editable={peer.isConnected}
+            onSubmitEditing={handleSend}
+          />
+          <TouchableOpacity
+            style={[
+              styles.sendBtn,
+              (!input.trim() || isSending || !peer.isConnected) &&
+                styles.sendBtnDisabled,
+            ]}
+            onPress={handleSend}
+            disabled={!input.trim() || isSending || !peer.isConnected}>
+            {isSending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.sendBtnText}>Send</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+const PURPLE = '#7C3AED';
+const PURPLE2 = '#9F67FF';
+const BG = '#0f0221';
+const BG2 = '#1a0533';
+const CARD = '#23104a';
+const TEXT = '#f3f0ff';
+const MUTED = '#9ca3af';
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  container: { flex: 1, backgroundColor: BG },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: BG2,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  backBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  backArrow: { fontSize: 24, color: PURPLE2 },
+  headerCenter: { flex: 1 },
+  menuBtn: { paddingHorizontal: 8, paddingVertical: 4 },
+  menuBtnText: { fontSize: 22, color: PURPLE2, fontWeight: '700' },
+  peerName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT,
+    letterSpacing: 0.3,
+  },
+  peerMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
+
+  // Offline banner
+  offlineBanner: {
+    backgroundColor: '#7c2d12',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  offlineBannerText: {
+    color: '#fed7aa',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  // Messages
+  messageList: { padding: 12, paddingBottom: 4 },
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: CARD,
+  },
+  bubbleOwn: { alignSelf: 'flex-end', backgroundColor: PURPLE },
+  bubblePeer: { alignSelf: 'flex-start' },
+  bubbleText: { color: TEXT, fontSize: 15, lineHeight: 20 },
+  bubbleTextOwn: { color: '#fff' },
+  bubbleTime: { fontSize: 10, color: MUTED, marginTop: 4, textAlign: 'right' },
+  bubbleTimeOwn: { color: 'rgba(255,255,255,0.6)' },
+
+  // Composer
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: BG2,
+    padding: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#2d1a4a',
+  },
+  composerInput: {
+    flex: 1,
+    backgroundColor: CARD,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    color: TEXT,
+    fontSize: 15,
+    maxHeight: 120,
+    marginRight: 10,
+  },
+  sendBtn: {
+    backgroundColor: PURPLE,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  sendBtnDisabled: { backgroundColor: '#4b2080' },
+  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  // Empty state
+  empty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  emptyIcon: { fontSize: 52, marginBottom: 16 },
+  emptyTitle: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    color: MUTED,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+});
