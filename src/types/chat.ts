@@ -27,3 +27,10 @@ export interface Message {
 }
 
 export type BluetoothState = 'on' | 'off' | 'unauthorized' | 'unknown';
+
+export interface Conversation {
+  peerId: string;
+  nickname: string;
+  lastMessage?: string;
+  lastMessageAt?: number;
+}

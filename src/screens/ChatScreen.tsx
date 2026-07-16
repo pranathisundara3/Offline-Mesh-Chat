@@ -21,7 +21,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useBitChat } from '../hooks/useBitChat';
-import type { Message, Peer } from '../types/chat';
+import { useConversations } from '../hooks/useConversations';
+import type { Message, Peer, Conversation } from '../types/chat';
 import type { RootStackParamList } from '../navigation/types';
 import * as Bridge from '../native/BitChatBridge';
 
@@ -115,9 +116,52 @@ function PeerRow({
   );
 }
 
+function ChatRow({
+  conv,
+  isConnected,
+  onPress,
+}: {
+  conv: Conversation;
+  isConnected: boolean;
+  onPress: () => void;
+}) {
+  const dot = isConnected ? '🟢' : '⚫';
+  const status = isConnected ? 'Online' : 'Offline';
+  
+  let timeStr = '';
+  if (conv.lastMessageAt) {
+    const d = new Date(conv.lastMessageAt);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      timeStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+  }
+
+  return (
+    <TouchableOpacity style={styles.peerRow} onPress={onPress}>
+      <View style={styles.chatRowContent}>
+        <View style={styles.chatRowHeader}>
+          <Text style={styles.peerNick}>{conv.nickname}</Text>
+          <Text style={styles.bubbleTime}>{timeStr}</Text>
+        </View>
+        <View style={styles.chatRowFooter}>
+          <Text style={styles.chatRowPreview} numberOfLines={1}>
+            {conv.lastMessage ? conv.lastMessage : 'No messages yet'}
+          </Text>
+          <Text style={styles.peerId}>
+            {dot} {status}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
-type Tab = 'chat' | 'peers';
+type Tab = 'chat' | 'chats' | 'peers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -147,6 +191,8 @@ export default function ChatScreen({ route, navigation }: Props) {
 
   const { messages, peers, bluetoothState, myPeerId, sendMessage, clearMessages } =
     useBitChat({ nickname });
+    
+  const { conversations } = useConversations(myPeerId);
 
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [input, setInput] = useState('');
@@ -230,15 +276,17 @@ export default function ChatScreen({ route, navigation }: Props) {
 
       {/* ── Tab bar ─────────────────────────────────────────────────────── */}
       <View style={styles.tabBar}>
-        {(['chat', 'peers'] as Tab[]).map(tab => (
+        {(['chat', 'chats', 'peers'] as Tab[]).map(tab => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
             onPress={() => setActiveTab(tab)}>
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
               {tab === 'chat'
-                ? `💬 Mesh  (${messages.length})`
-                : `👥 Peers  (${peers.length})`}
+                ? `💬 Mesh`
+                : tab === 'chats'
+                  ? `Recent`
+                  : `👥 Peers`}
             </Text>
           </TouchableOpacity>
         ))}
@@ -298,6 +346,35 @@ export default function ChatScreen({ route, navigation }: Props) {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      ) : activeTab === 'chats' ? (
+        <FlatList
+          data={conversations}
+          keyExtractor={item => item.peerId}
+          renderItem={({ item }) => {
+            const isConnected = peers.some(p => p.peerId === item.peerId && p.isConnected);
+            return (
+              <ChatRow
+                conv={item}
+                isConnected={isConnected}
+                onPress={() => {
+                  navigation.navigate('PrivateChat', {
+                    peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
+                  });
+                }}
+              />
+            );
+          }}
+          contentContainerStyle={styles.peerList}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>📭</Text>
+              <Text style={styles.emptyTitle}>No recent chats</Text>
+              <Text style={styles.emptySubtitle}>
+                Private conversations will appear here.
+              </Text>
+            </View>
+          }
+        />
       ) : (
         <FlatList
           data={peers}
@@ -399,6 +476,10 @@ const styles = StyleSheet.create({
   peerDot: { fontSize: 16, marginRight: 12 },
   peerNick: { color: TEXT, fontSize: 15, fontWeight: '600' },
   peerId: { color: MUTED, fontSize: 11, marginTop: 2 },
+  chatRowContent: { flex: 1 },
+  chatRowHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  chatRowFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  chatRowPreview: { color: MUTED, fontSize: 11, marginTop: 2, flex: 1, marginRight: 10 },
 
   // Empty states
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },

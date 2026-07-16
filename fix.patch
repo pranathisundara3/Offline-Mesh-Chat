@@ -1,0 +1,45 @@
+--- android/app/src/main/java/com/offlinechatapp/bitchat/BLEMeshService.kt
++++ android/app/src/main/java/com/offlinechatapp/bitchat/BLEMeshService.kt
+@@ -319,17 +319,16 @@
+         if (macFullyDisconnected) {
+             writeQueues[addr]?.clear()
+             writeQueues.remove(addr)
+             writeBuffers.remove(addr)
+             
+-            val peerId = deviceAddressToPeerId.remove(addr)
++            val peerId = deviceAddressToPeerId[addr]
+             if (peerId != null) {
+                 val stillConnected = centralConns.keys.any { deviceAddressToPeerId[it] == peerId } ||
+                                      peripheralConns.any { deviceAddressToPeerId[it] == peerId }
+                 if (!stillConnected) {
+                     Log.i(TAG, "  Peer $peerId marked disconnected (all paths gone)")
+                     peerRegistry.setConnected(peerId, false)
+                     eventListener?.onPeerDisconnected(peerId)
+                     eventListener?.onPeerListUpdated(peerRegistry.all())
+                 } else {
+                     Log.d(TAG, "  Peer $peerId remains connected on another path")
+                 }
+@@ -375,6 +374,12 @@
+             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                 peripheralConns.add(device.address)
++                val knownPeerId = deviceAddressToPeerId[device.address]
++                if (knownPeerId != null) {
++                    peerRegistry.setConnected(knownPeerId, true)
++                    eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
++                    eventListener?.onPeerListUpdated(peerRegistry.all())
++                }
+             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                 handleDisconnect(device.address, "peripheral")
+             }
+@@ -478,6 +483,12 @@
+                 BluetoothProfile.STATE_CONNECTED -> {
+                     Log.i(TAG, "✅ GATT connected: $  status=$status")
++                    val knownPeerId = deviceAddressToPeerId[gatt.device.address]
++                    if (knownPeerId != null) {
++                        peerRegistry.setConnected(knownPeerId, true)
++                        eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
++                        eventListener?.onPeerListUpdated(peerRegistry.all())
++                    }
+                     Log.i(TAG, "   → Requesting MTU=512 then discovering services…")
+                     // Request maximum MTU before service discovery
+                     val mtuRequested = gatt.requestMtu(512)

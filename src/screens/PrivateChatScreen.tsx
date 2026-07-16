@@ -66,16 +66,17 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
     Bridge.getMyPeerId().then(id => setMyPeerId(id)).catch(() => {});
   }, []);
 
-  const { messages, sendMessage, isSending, clearMessages } = usePrivateChat({
+  const { messages, sendMessage, isSending, clearMessages, isConnected } = usePrivateChat({
     peerId: peer.peerId,
     myPeerId,
+    initialIsConnected: peer.isConnected,
   });
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isSending || !peer.isConnected) return;
+    if (!input.trim() || isSending || !isConnected) return;
     const text = input.trim();
     setInput('');
     try {
@@ -84,7 +85,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
     } catch {
       Alert.alert('Send Failed', 'Could not deliver the message.');
     }
-  }, [input, isSending, peer.isConnected, sendMessage]);
+  }, [input, isSending, isConnected, sendMessage]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -104,7 +105,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
             {peer.nickname}
           </Text>
           <Text style={styles.peerMeta}>
-            {peer.isConnected ? '🟢 Connected' : '⚫ Offline'} ·{' '}
+            {isConnected ? '🟢 Connected' : '⚫ Offline'} ·{' '}
             {peer.peerId.slice(0, 12)}…
           </Text>
         </View>
@@ -142,7 +143,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
       </View>
 
       {/* ── Offline banner ────────────────────────────────────────────────── */}
-      {!peer.isConnected && (
+      {!isConnected && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>
             ⚫ Peer is offline — messages cannot be delivered.
@@ -186,7 +187,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
             value={input}
             onChangeText={setInput}
             placeholder={
-              peer.isConnected
+              isConnected
                 ? `Message ${peer.nickname}…`
                 : 'Peer is offline'
             }
@@ -194,17 +195,17 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
             multiline
             maxLength={1000}
             returnKeyType="send"
-            editable={peer.isConnected}
+            editable={isConnected}
             onSubmitEditing={handleSend}
           />
           <TouchableOpacity
             style={[
               styles.sendBtn,
-              (!input.trim() || isSending || !peer.isConnected) &&
+              (!input.trim() || isSending || !isConnected) &&
                 styles.sendBtnDisabled,
             ]}
             onPress={handleSend}
-            disabled={!input.trim() || isSending || !peer.isConnected}>
+            disabled={!input.trim() || isSending || !isConnected}>
             {isSending ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (

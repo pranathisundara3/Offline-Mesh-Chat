@@ -16,7 +16,7 @@
 //   Private chats previously capped at 200 are raised to 500 for consistency.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Message } from '../types/chat';
+import type { Message, Conversation } from '../types/chat';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,9 @@ export const STORAGE_KEYS = {
 
   /** Key for a private DM conversation with a specific peer. */
   private: (peerId: string): string => `@bitchat_dm_${peerId}`,
+
+  /** Key for the conversation index (Chats tab). */
+  conversations: '@bitchat_dm_conversations' as const,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,4 +80,66 @@ export async function clearMessages(key: string): Promise<void> {
   } catch {
     // Swallow
   }
+}
+
+/**
+ * Load the conversation index.
+ */
+export async function loadConversations(): Promise<Conversation[]> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEYS.conversations);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as Conversation[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save the conversation index.
+ */
+export async function saveConversations(conversations: Conversation[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.conversations, JSON.stringify(conversations));
+  } catch {
+    // Swallow
+  }
+}
+
+// ── Global Private Message Queue ──────────────────────────────────────────────
+
+// Promise chain to prevent race conditions when appending messages to AsyncStorage
+let privateSaveQueue = Promise.resolve();
+
+/**
+ * Safely append a private message to a peer's history.
+ * Uses a promise queue to guarantee sequential read-modify-write per invocation.
+ */
+export function appendPrivateMessageSafe(peerId: string, message: Message): Promise<void> {
+  privateSaveQueue = privateSaveQueue.then(async () => {
+    try {
+      const key = STORAGE_KEYS.private(peerId);
+      const history = await loadMessages(key);
+      
+      // Deduplicate
+      if (history.some(m => m.id === message.id)) {
+        return;
+      }
+      
+      history.push(message);
+      
+      // Enforce limit
+      if (history.length > MAX_HISTORY) {
+        history.shift();
+      }
+      
+      await saveMessages(key, history);
+    } catch {
+      // Swallow error to prevent blocking the queue
+    }
+  });
+  
+  return privateSaveQueue;
 }

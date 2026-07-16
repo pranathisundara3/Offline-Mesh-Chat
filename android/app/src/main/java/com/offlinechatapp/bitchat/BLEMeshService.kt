@@ -125,6 +125,8 @@ class BLEMeshService(
 
     /** Connections we opened as central: device-address → BluetoothGatt */
     private val centralConns      = ConcurrentHashMap<String, BluetoothGatt>()
+    /** Connections opened to our GATT server (peripheral role): device-address */
+    private val peripheralConns   = ConcurrentHashMap.newKeySet<String>()
     /** Characteristic handle per connected peer device */
     private val peerCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
     /** Per-device write queues (address → WriteQueue) */
@@ -268,6 +270,7 @@ class BLEMeshService(
 
         centralConns.values.forEach { it.disconnect() }
         centralConns.clear()
+        peripheralConns.clear()
         peerCharacteristics.clear()
         writeQueues.clear()
         writeBuffers.clear()
@@ -297,6 +300,40 @@ class BLEMeshService(
         Log.i(TAG, "Nickname changed to '$nickname'")
         myNickname = nickname
         broadcastAnnounce()
+    }
+
+    // ── Disconnect Helper ─────────────────────────────────────────────────────
+
+    private fun handleDisconnect(addr: String, role: String) {
+        if (role == "central") {
+            centralConns.remove(addr)
+            peerCharacteristics.remove(addr)
+            subscribedDevices.remove(addr)
+        } else {
+            peripheralConns.remove(addr)
+        }
+
+        val macFullyDisconnected = !centralConns.containsKey(addr) && !peripheralConns.contains(addr)
+
+        if (macFullyDisconnected) {
+            writeQueues[addr]?.clear()
+            writeQueues.remove(addr)
+            writeBuffers.remove(addr)
+            
+            val peerId = deviceAddressToPeerId[addr]
+            if (peerId != null) {
+                val stillConnected = centralConns.keys.any { deviceAddressToPeerId[it] == peerId } ||
+                                     peripheralConns.any { deviceAddressToPeerId[it] == peerId }
+                if (!stillConnected) {
+                    Log.i(TAG, "  Peer $peerId marked disconnected (all paths gone)")
+                    peerRegistry.setConnected(peerId, false)
+                    eventListener?.onPeerDisconnected(peerId)
+                    eventListener?.onPeerListUpdated(peerRegistry.all())
+                } else {
+                    Log.d(TAG, "  Peer $peerId remains connected on another path")
+                }
+            }
+        }
     }
 
     // ── GATT Server (peripheral role) ─────────────────────────────────────────
@@ -334,16 +371,16 @@ class BLEMeshService(
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             val stateStr = if (newState == BluetoothProfile.STATE_CONNECTED) "CONNECTED" else "DISCONNECTED"
             Log.i(TAG, "GATT server: device ${device.address} → $stateStr (status=$status)")
-            if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                val addr = device.address
-                writeQueues[addr]?.clear()
-                writeQueues.remove(addr)
-                writeBuffers.remove(addr)
-                val peerId = deviceAddressToPeerId.remove(addr)
-                if (peerId != null) {
-                    Log.i(TAG, "  Peer $peerId marked disconnected (addr=$addr)")
-                    peerRegistry.setConnected(peerId, false)
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                peripheralConns.add(device.address)
+                val knownPeerId = deviceAddressToPeerId[device.address]
+                if (knownPeerId != null) {
+                    peerRegistry.setConnected(knownPeerId, true)
+                    eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
+                    eventListener?.onPeerListUpdated(peerRegistry.all())
                 }
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                handleDisconnect(device.address, "peripheral")
             }
         }
 
@@ -445,6 +482,12 @@ class BLEMeshService(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     Log.i(TAG, "✅ GATT connected: ${gatt.device.address}  status=$status")
+                    val knownPeerId = deviceAddressToPeerId[gatt.device.address]
+                    if (knownPeerId != null) {
+                        peerRegistry.setConnected(knownPeerId, true)
+                        eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
+                        eventListener?.onPeerListUpdated(peerRegistry.all())
+                    }
                     Log.i(TAG, "   → Requesting MTU=512 then discovering services…")
                     // Request maximum MTU before service discovery
                     val mtuRequested = gatt.requestMtu(512)
@@ -456,23 +499,7 @@ class BLEMeshService(
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     Log.i(TAG, "⚠ GATT disconnected: ${gatt.device.address}  status=$status")
-                    val addr = gatt.device.address
-                    centralConns.remove(addr)
-                    peerCharacteristics.remove(addr)
-                    writeQueues[addr]?.clear()
-                    writeQueues.remove(addr)
-                    writeBuffers.remove(addr)
-                    subscribedDevices.remove(addr)
-                    // Look up which specific peer was on this address and disconnect only them.
-                    val peerId = deviceAddressToPeerId.remove(addr)
-                    if (peerId != null) {
-                        Log.i(TAG, "  Peer $peerId marked disconnected (addr=$addr)")
-                        peerRegistry.setConnected(peerId, false)
-                        eventListener?.onPeerDisconnected(peerId)
-                        eventListener?.onPeerListUpdated(peerRegistry.all())
-                    } else {
-                        Log.w(TAG, "  No peerId known for addr=$addr — skipping peer state update")
-                    }
+                    handleDisconnect(gatt.device.address, "central")
                     gatt.close()
                 }
             }

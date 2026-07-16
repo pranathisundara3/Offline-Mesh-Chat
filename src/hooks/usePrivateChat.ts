@@ -21,7 +21,6 @@ import type { Message } from '../types/chat';
 import * as Bridge from '../native/BitChatBridge';
 import {
   loadMessages,
-  saveMessages,
   clearMessages as storageClear,
   MAX_HISTORY,
   STORAGE_KEYS,
@@ -32,6 +31,8 @@ interface UsePrivateChatOptions {
   peerId: string;
   /** Our own peer ID — obtained from useBitChat or Bridge.getMyPeerId(). */
   myPeerId: string;
+  /** Initial connection status from route params */
+  initialIsConnected: boolean;
 }
 
 interface UsePrivateChatReturn {
@@ -39,14 +40,17 @@ interface UsePrivateChatReturn {
   sendMessage: (content: string) => Promise<void>;
   isSending: boolean;
   clearMessages: () => void;
+  isConnected: boolean;
 }
 
 export function usePrivateChat({
   peerId,
   myPeerId,
+  initialIsConnected,
 }: UsePrivateChatOptions): UsePrivateChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [isConnected, setIsConnected] = useState(initialIsConnected);
 
   // Dedup: the event bus fires once per packet but guard against re-renders.
   // Pre-populated with stored IDs on load so restored messages cannot be
@@ -105,26 +109,28 @@ export function usePrivateChat({
 
       setMessages(prev => {
         const next = [...prev, msg];
-        // Pure updater — no side effects.
-        // Persistence is handled by the useEffect below.
         return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
       });
+    });
+
+    const connSub = Bridge.onPeerConnected(data => {
+      if (data.peerId === peerId) setIsConnected(true);
+    });
+
+    const disconnSub = Bridge.onPeerDisconnected(data => {
+      if (data.peerId === peerId) setIsConnected(false);
     });
 
     return () => {
       isMounted = false;
       sub?.remove();
+      connSub?.remove();
+      disconnSub?.remove();
     };
   }, [peerId, myPeerId]);
 
-  // Persist per-peer DM messages after every state change.
-  // Runs after render — safe call site for native bridge ops.
-  // historyLoaded and peerId guards prevent writing before the initial load
-  // or when the hook is in a partially-initialised state.
-  useEffect(() => {
-    if (!historyLoaded.current || !peerId) return;
-    saveMessages(STORAGE_KEYS.private(peerId), messages);
-  }, [messages, peerId]);
+  // Note: Persistence of private messages is now handled globally by useConversations
+  // to avoid race conditions when receiving private messages while this screen is unmounted.
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -148,5 +154,5 @@ export function usePrivateChat({
     seenIds.current.clear();
   }, [peerId]);
 
-  return { messages, sendMessage, isSending, clearMessages };
+  return { messages, sendMessage, isSending, clearMessages, isConnected };
 }
