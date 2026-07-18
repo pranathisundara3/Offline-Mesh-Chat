@@ -1,6 +1,12 @@
 package com.offlinechatapp.bitchat
 
 import android.util.Log
+import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.os.Build
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -47,7 +53,24 @@ class BitChatModule(reactContext: ReactApplicationContext) :
     private val bleService   = BLEMeshService(reactContext.applicationContext, peerRegistry)
     private val noiseSessions = NoiseSessionManager(bleService)  // Phase 3
 
+    private val stopReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BitChatForegroundService.ACTION_STOP_MESH) {
+                Log.i(TAG, "Received ACTION_STOP_MESH from Foreground Service. Stopping mesh.")
+                stopMesh()
+            }
+        }
+    }
+
     init {
+        // Register receiver for when user clicks "Disconnect" on the foreground notification
+        val filter = IntentFilter(BitChatForegroundService.ACTION_STOP_MESH)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            reactContext.registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            reactContext.registerReceiver(stopReceiver, filter)
+        }
+
         peerRegistry.addListener { peers ->
             emitPeerListUpdated(peers)
         }
@@ -165,6 +188,10 @@ class BitChatModule(reactContext: ReactApplicationContext) :
     fun startMesh(nickname: String) {
         Log.i(TAG, "startMesh(nickname=$nickname)")
         bleService.start(nickname)
+
+        // Start the Foreground Service to keep process alive
+        val serviceIntent = Intent(reactApplicationContext, BitChatForegroundService::class.java)
+        ContextCompat.startForegroundService(reactApplicationContext, serviceIntent)
     }
 
     /** Stop the BLE mesh cleanly (broadcasts LEAVE, closes all GATT connections). */
@@ -172,6 +199,10 @@ class BitChatModule(reactContext: ReactApplicationContext) :
     fun stopMesh() {
         Log.i(TAG, "stopMesh()")
         bleService.stop()
+
+        // Stop the Foreground Service
+        val serviceIntent = Intent(reactApplicationContext, BitChatForegroundService::class.java)
+        reactApplicationContext.stopService(serviceIntent)
     }
 
     /**

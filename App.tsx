@@ -18,6 +18,26 @@ import PrivateChatScreen from './src/screens/PrivateChatScreen';
 import type { RootStackParamList } from './src/navigation/types';
 import * as Bridge from './src/native/BitChatBridge';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import notifee, { EventType } from '@notifee/react-native';
+import { requestNotificationPermission, createNotificationChannel } from './src/utils/notifications';
+import { navigationRef } from './src/navigation/navigationRef';
+
+// Handle background notification presses
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  if (type === EventType.PRESS) {
+    const { data } = detail.notification || {};
+    if (navigationRef.isReady()) {
+      if (data?.type === 'private' && data.peer) {
+        // Must parse peer because it's passed as a JSON string or object depending on serialization
+        const peer = typeof data.peer === 'string' ? JSON.parse(data.peer) : data.peer;
+        navigationRef.navigate('PrivateChat', { peer });
+      } else if (data?.type === 'public') {
+        // Navigate back to Chat. In a real app we might pass params, but Chat is the root
+        navigationRef.navigate('Chat', { nickname: '', onChangeNickname: () => {} });
+      }
+    }
+  }
+});
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -93,7 +113,28 @@ function App() {
     AsyncStorage.getItem(NICKNAME_KEY)
       .then(saved => setNickname(saved ?? ''))
       .catch(() => setNickname(''));
-  }, []);
+
+    // Initialize notifications
+    if (Platform.OS === 'android') {
+      requestNotificationPermission();
+      createNotificationChannel();
+    }
+
+    // Handle foreground notification presses
+    return notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.PRESS) {
+        const { data } = detail.notification || {};
+        if (navigationRef.isReady()) {
+          if (data?.type === 'private' && data.peer) {
+            const peer = typeof data.peer === 'string' ? JSON.parse(data.peer) : data.peer;
+            navigationRef.navigate('PrivateChat', { peer });
+          } else if (data?.type === 'public') {
+            navigationRef.navigate('Chat', { nickname: nickname ?? '', onChangeNickname: handleChangeNickname });
+          }
+        }
+      }
+    });
+  }, [nickname]);
 
   if (Platform.OS !== 'android') {
     return (
@@ -143,7 +184,7 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <Stack.Navigator
           initialRouteName="Chat"
           screenOptions={{ headerShown: false }}>

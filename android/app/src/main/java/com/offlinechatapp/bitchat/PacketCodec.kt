@@ -101,7 +101,7 @@ data class BitchatPacket(
 }
 
 /** Extension: ByteArray → lowercase hex string */
-fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
+fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
 /** Extension: hex string → ByteArray (returns null on bad input) */
 fun String.hexToByteArray(): ByteArray? {

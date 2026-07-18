@@ -13,8 +13,11 @@
 //     stored history before the async load has completed.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import type { Message, Peer, BluetoothState } from '../types/chat';
 import * as Bridge from '../native/BitChatBridge';
+import { navigationRef } from '../navigation/navigationRef';
+import { displayNotification } from '../utils/notifications';
 import {
   loadMessages,
   saveMessages,
@@ -42,6 +45,7 @@ export function useBitChat({ nickname }: UseBitChatOptions): UseBitChatReturn {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [bluetoothState, setBluetoothState] = useState<BluetoothState>('unknown');
   const [myPeerId, setMyPeerId] = useState('');
+  const myPeerIdRef = useRef('');
 
   // Track seen message IDs to deduplicate across event re-fires.
   // Populated with stored IDs on load so restored messages are never duplicated.
@@ -72,13 +76,17 @@ export function useBitChat({ nickname }: UseBitChatOptions): UseBitChatReturn {
 
     // ── Step 2: Start mesh and fetch initial data ─────────────────────────────
     Bridge.startMesh(nickname);
-    Bridge.getMyPeerId().then(id => { if (isMounted) setMyPeerId(id); }).catch(() => {});
+    Bridge.getMyPeerId().then(id => { 
+      if (isMounted) {
+        setMyPeerId(id);
+        myPeerIdRef.current = id;
+      }
+    }).catch(() => {});
     Bridge.getPeers().then(list => { if (isMounted) setPeers(list); }).catch(() => {});
 
     // ── Step 3: Subscribe to BLE events ──────────────────────────────────────
     const subs = [
       Bridge.onMessageReceived(msg => {
-        if (msg.isPrivate) return;
         if (seenIds.current.has(msg.id)) return;
         seenIds.current.add(msg.id);
 
@@ -88,6 +96,53 @@ export function useBitChat({ nickname }: UseBitChatOptions): UseBitChatReturn {
           // Persistence is handled by the useEffect below.
           return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
         });
+
+        // --- Notification Logic ---
+        // 1. Do not notify for my own messages.
+        if (msg.senderId === myPeerIdRef.current) return;
+
+        // 2. Check if we are viewing the exact conversation while app is active.
+        const isAppActive = AppState.currentState === 'active';
+        const route = navigationRef.isReady() ? navigationRef.getCurrentRoute() : null;
+        
+        let shouldNotify = true;
+        
+        if (isAppActive && route) {
+          if (msg.isPrivate) {
+            // If inside PrivateChatScreen with this specific peer, do not notify.
+            if (
+              route.name === 'PrivateChat' &&
+              route.params &&
+              (route.params as any).peer?.peerId === msg.senderId
+            ) {
+              shouldNotify = false;
+            }
+          } else {
+            // If inside Mesh Chat and it's a mesh message, do not notify.
+            if (route.name === 'Chat') {
+              shouldNotify = false;
+            }
+          }
+        }
+
+        if (shouldNotify) {
+          if (msg.isPrivate) {
+            const peerObj = { peerId: msg.senderId, nickname: msg.senderNickname };
+            displayNotification(
+              msg.id,
+              'Private Message',
+              `New private message from ${msg.senderNickname}`,
+              { type: 'private', peer: JSON.stringify(peerObj) }
+            );
+          } else {
+            displayNotification(
+              msg.id,
+              'Mesh',
+              `${msg.senderNickname}: ${msg.content}`,
+              { type: 'public' }
+            );
+          }
+        }
       }),
 
       Bridge.onPeerListUpdated(({ peers: updated }) => {
@@ -102,7 +157,7 @@ export function useBitChat({ nickname }: UseBitChatOptions): UseBitChatReturn {
     return () => {
       isMounted = false;
       subs.forEach(s => s?.remove());
-      Bridge.stopMesh();
+      // Bridge.stopMesh(); // Intentionally removed so the mesh stays alive in the background
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

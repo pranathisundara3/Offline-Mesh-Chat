@@ -718,6 +718,9 @@ class BLEMeshService(
         }
         Log.i(TAG, "▶ Dispatch $typeName from $senderId (ttl=${packet.ttl})")
 
+        // Map this MAC to the sender ID immediately to prevent spurious disconnects
+        deviceAddressToPeerId[fromDeviceAddress] = senderId
+
         when (packet.type) {
             MessageType.ANNOUNCE         -> handleAnnounce(packet, fromDeviceAddress)
             MessageType.MESSAGE          -> handlePublicMessage(packet)
