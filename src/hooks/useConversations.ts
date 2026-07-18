@@ -6,6 +6,8 @@ import {
   loadConversations,
   saveConversations,
   appendPrivateMessageSafe,
+  clearMessages,
+  STORAGE_KEYS,
 } from '../utils/chatStorage';
 
 export function useConversations(myPeerId: string) {
@@ -103,5 +105,15 @@ export function useConversations(myPeerId: string) {
     });
   }, []);
 
-  return { conversations, clearConversationPreview };
+  // Helper to completely delete a conversation
+  const deleteConversation = useCallback(async (peerId: string) => {
+    // 1. Delete all messages from local storage
+    await clearMessages(STORAGE_KEYS.private(peerId));
+    
+    // 2. Remove conversation entirely from memory
+    // (This triggers the effect that saves the conversation index)
+    setConversations(prev => prev.filter(c => c.peerId !== peerId));
+  }, []);
+
+  return { conversations, clearConversationPreview, deleteConversation };
 }

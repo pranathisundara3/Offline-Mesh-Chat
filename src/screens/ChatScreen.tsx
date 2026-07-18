@@ -25,6 +25,7 @@ import { useConversations } from '../hooks/useConversations';
 import type { Message, Peer, Conversation } from '../types/chat';
 import type { RootStackParamList } from '../navigation/types';
 import * as Bridge from '../native/BitChatBridge';
+import { clearMessages as storageClear, STORAGE_KEYS } from '../utils/chatStorage';
 
 // ── Permission helper (Android 12+) ──────────────────────────────────────────
 
@@ -120,10 +121,12 @@ function ChatRow({
   conv,
   isConnected,
   onPress,
+  onLongPress,
 }: {
   conv: Conversation;
   isConnected: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 }) {
   const dot = isConnected ? '🟢' : '⚫';
   const status = isConnected ? 'Online' : 'Offline';
@@ -140,7 +143,7 @@ function ChatRow({
   }
 
   return (
-    <TouchableOpacity style={styles.peerRow} onPress={onPress}>
+    <TouchableOpacity style={styles.peerRow} onPress={onPress} onLongPress={onLongPress}>
       <View style={styles.chatRowContent}>
         <View style={styles.chatRowHeader}>
           <Text style={styles.peerNick}>{conv.nickname}</Text>
@@ -192,9 +195,10 @@ export default function ChatScreen({ route, navigation }: Props) {
   const { messages, peers, bluetoothState, myPeerId, sendMessage, clearMessages } =
     useBitChat({ nickname });
     
-  const { conversations } = useConversations(myPeerId);
+  const { conversations, clearConversationPreview, deleteConversation } = useConversations(myPeerId);
 
   const [activeTab, setActiveTab] = useState<Tab>('chat');
+  const [searchQuery, setSearchQuery] = useState('');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -223,6 +227,11 @@ export default function ChatScreen({ route, navigation }: Props) {
   }
 
   const connectedCount = peers.filter(p => p.isConnected).length;
+
+  const filteredConversations = conversations.filter(c => 
+    c.nickname.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    c.peerId.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -347,34 +356,111 @@ export default function ChatScreen({ route, navigation }: Props) {
           </View>
         </KeyboardAvoidingView>
       ) : activeTab === 'chats' ? (
-        <FlatList
-          data={conversations}
-          keyExtractor={item => item.peerId}
-          renderItem={({ item }) => {
-            const isConnected = peers.some(p => p.peerId === item.peerId && p.isConnected);
-            return (
-              <ChatRow
-                conv={item}
-                isConnected={isConnected}
-                onPress={() => {
-                  navigation.navigate('PrivateChat', {
-                    peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
-                  });
-                }}
-              />
-            );
-          }}
-          contentContainerStyle={styles.peerList}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>📭</Text>
-              <Text style={styles.emptyTitle}>No recent chats</Text>
-              <Text style={styles.emptySubtitle}>
-                Private conversations will appear here.
-              </Text>
-            </View>
-          }
-        />
+        <View style={styles.flex}>
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search chats…"
+              placeholderTextColor={MUTED}
+              returnKeyType="search"
+            />
+          </View>
+          <FlatList
+            data={filteredConversations}
+            keyExtractor={item => item.peerId}
+            renderItem={({ item }) => {
+              const isConnected = peers.some(p => p.peerId === item.peerId && p.isConnected);
+              return (
+                <ChatRow
+                  conv={item}
+                  isConnected={isConnected}
+                  onPress={() => {
+                    navigation.navigate('PrivateChat', {
+                      peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
+                    });
+                  }}
+                  onLongPress={() => {
+                    Alert.alert(
+                      'Options',
+                      item.nickname,
+                      [
+                        {
+                          text: 'Open',
+                          onPress: () => {
+                            navigation.navigate('PrivateChat', {
+                              peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
+                            });
+                          }
+                        },
+                        {
+                          text: '🗑️ Clear Chat',
+                          onPress: () => {
+                            Alert.alert(
+                              `Clear chat with ${item.nickname}?`,
+                              'This will delete the local conversation history but keep the chat in the list.',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Clear',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    storageClear(STORAGE_KEYS.private(item.peerId));
+                                    clearConversationPreview(item.peerId);
+                                  }
+                                }
+                              ]
+                            );
+                          }
+                        },
+                        {
+                          text: '❌ Delete Conversation',
+                          style: 'destructive',
+                          onPress: () => {
+                            Alert.alert(
+                              `Delete conversation with ${item.nickname}?`,
+                              'This will permanently remove the conversation and its history.',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Delete',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    deleteConversation(item.peerId);
+                                  }
+                                }
+                              ]
+                            );
+                          }
+                        },
+                        { text: 'Cancel', style: 'cancel' }
+                      ]
+                    );
+                  }}
+                />
+              );
+            }}
+            contentContainerStyle={styles.peerList}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={styles.emptyIcon}>📭</Text>
+                {conversations.length === 0 ? (
+                  <>
+                    <Text style={styles.emptyTitle}>No recent chats</Text>
+                    <Text style={styles.emptySubtitle}>
+                      Private conversations will appear here.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.emptyTitle}>No conversations found</Text>
+                  </>
+                )}
+              </View>
+            }
+          />
+        </View>
       ) : (
         <FlatList
           data={peers}
@@ -428,6 +514,10 @@ const styles = StyleSheet.create({
   // Banner
   banner: { backgroundColor: '#7c2d12', paddingHorizontal: 16, paddingVertical: 10 },
   bannerText: { color: '#fed7aa', fontSize: 13, textAlign: 'center' },
+
+  // Search
+  searchContainer: { paddingHorizontal: 12, paddingTop: 12 },
+  searchInput: { backgroundColor: CARD, color: TEXT, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
 
   // Tabs
   tabBar: { flexDirection: 'row', backgroundColor: BG2, borderBottomWidth: 1, borderBottomColor: '#2d1a4a' },
