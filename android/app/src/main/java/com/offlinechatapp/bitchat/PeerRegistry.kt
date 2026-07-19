@@ -25,9 +25,17 @@ data class PeerInfo(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is PeerInfo) return false
-        return peerId == other.peerId
+        return peerId == other.peerId &&
+               nickname == other.nickname &&
+               isConnected == other.isConnected
     }
-    override fun hashCode(): Int = peerId.hashCode()
+    
+    override fun hashCode(): Int {
+        var result = peerId.hashCode()
+        result = 31 * result + nickname.hashCode()
+        result = 31 * result + isConnected.hashCode()
+        return result
+    }
 }
 
 /**

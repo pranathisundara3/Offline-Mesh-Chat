@@ -1,6 +1,8 @@
 // src/hooks/useConversations.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import type { Conversation } from '../types/chat';
+import { navigationRef } from '../navigation/navigationRef';
 import * as Bridge from '../native/BitChatBridge';
 import {
   loadConversations,
@@ -44,6 +46,17 @@ export function useConversations(myPeerId: string) {
 
       // 3. Append to private storage safely
       appendPrivateMessageSafe(remotePeerId, msg).then(() => {
+        // Check if chat is currently open
+        const isAppActive = AppState.currentState === 'active';
+        const route = navigationRef.isReady() ? navigationRef.getCurrentRoute() : null;
+        const isViewingThisChat = 
+          isAppActive && 
+          route?.name === 'PrivateChat' && 
+          (route.params as any)?.peer?.peerId === remotePeerId;
+
+        const isSentByMe = msg.senderId === myPeerId;
+        const formattedMessage = isSentByMe ? `You: ${msg.content}` : msg.content;
+
         // 4. Update conversation index in memory
         setConversations(prev => {
           let updated = [...prev];
@@ -57,20 +70,35 @@ export function useConversations(myPeerId: string) {
             // Only update lastMessage if it's newer
             if (!existing.lastMessageAt || msg.timestamp >= existing.lastMessageAt) {
               updated.splice(existingIdx, 1);
+              
+              let unreadCount = existing.unreadCount || 0;
+              if (!isSentByMe && !isViewingThisChat) {
+                unreadCount += 1;
+              } else if (isViewingThisChat) {
+                unreadCount = 0;
+              }
+
               updated.unshift({
                 ...existing,
                 nickname: newNickname,
-                lastMessage: msg.content,
+                lastMessage: formattedMessage,
                 lastMessageAt: msg.timestamp,
+                unreadCount,
               });
             }
           } else {
             // New conversation
+            let unreadCount = 0;
+            if (!isSentByMe && !isViewingThisChat) {
+              unreadCount = 1;
+            }
+
             updated.unshift({
               peerId: remotePeerId,
               nickname: remoteNickname || 'Unknown Peer',
-              lastMessage: msg.content,
+              lastMessage: formattedMessage,
               lastMessageAt: msg.timestamp,
+              unreadCount,
             });
           }
           return updated;
@@ -98,6 +126,7 @@ export function useConversations(myPeerId: string) {
         updated[idx] = {
           ...updated[idx],
           lastMessage: undefined,
+          unreadCount: 0,
           // We keep lastMessageAt so it maintains its sort order
         };
       }
@@ -115,5 +144,18 @@ export function useConversations(myPeerId: string) {
     setConversations(prev => prev.filter(c => c.peerId !== peerId));
   }, []);
 
-  return { conversations, clearConversationPreview, deleteConversation };
+  // Helper to reset unread count to 0 when chat is opened
+  const markConversationAsRead = useCallback((peerId: string) => {
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.peerId === peerId);
+      if (idx !== -1 && prev[idx].unreadCount !== 0 && prev[idx].unreadCount !== undefined) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], unreadCount: 0 };
+        return updated;
+      }
+      return prev;
+    });
+  }, []);
+
+  return { conversations, clearConversationPreview, deleteConversation, markConversationAsRead };
 }

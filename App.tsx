@@ -65,7 +65,7 @@ interface NicknameGateProps {
 function NicknameGate({
   initialValue = '',
   onReady,
-  title = 'BitChat',
+  title = 'MeshChat',
   submitLabel = 'Join the mesh →',
 }: NicknameGateProps) {
   const [nick, setNick] = useState(initialValue);
@@ -140,7 +140,7 @@ function App() {
     return (
       <SafeAreaView style={styles.gate}>
         <Text style={styles.gateIcon}>⚡</Text>
-        <Text style={styles.gateTitle}>BitChat</Text>
+        <Text style={styles.gateTitle}>MeshChat</Text>
         <Text style={styles.gateSub}>
           BLE mesh is currently Android-only.{'\n'}iOS support coming in Phase 3.
         </Text>
@@ -219,12 +219,12 @@ function App() {
   );
 }
 
-const PURPLE = '#7C3AED';
-const PURPLE2 = '#9F67FF';
-const BG = '#0f0221';
-const TEXT = '#f3f0ff';
-const MUTED = '#9ca3af';
-const CARD = '#23104a';
+const PURPLE = '#8B5CF6';
+const PURPLE2 = '#A78BFA';
+const BG = '#0B0410';
+const TEXT = '#F8FAFC';
+const MUTED = '#94A3B8';
+const CARD = '#170B25';
 
 const styles = StyleSheet.create({
   gate: {
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
   nickInput: {
     width: '100%',
     backgroundColor: CARD,
-    borderRadius: 14,
+    borderRadius: 24,
     paddingHorizontal: 18,
     paddingVertical: 14,
     color: TEXT,
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   joinBtn: {
     width: '100%',
     backgroundColor: PURPLE,
-    borderRadius: 14,
+    borderRadius: 24,
     paddingVertical: 16,
     alignItems: 'center',
   },

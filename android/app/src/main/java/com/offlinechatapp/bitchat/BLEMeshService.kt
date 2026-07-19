@@ -139,11 +139,11 @@ class BLEMeshService(
     private val subscribedDevices = ConcurrentHashMap.newKeySet<String>()
 
     /**
-     * Maps BLE device MAC address → peerId (hex) so that on GATT disconnect
-     * we can mark exactly the right peer as offline instead of marking them all.
-     * Populated in handleAnnounce when the peer first identifies itself.
+     * Maps BLE device MAC address → set of peerIds (hex) so that on GATT disconnect
+     * we can mark exactly the right peers as offline instead of marking them all.
+     * Populated in dispatchIncomingPacket when any peer is reachable through this MAC.
      */
-    private val deviceAddressToPeerId = ConcurrentHashMap<String, String>()
+    private val deviceAddressToPeerIds = ConcurrentHashMap<String, MutableSet<String>>()
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -275,7 +275,7 @@ class BLEMeshService(
         writeQueues.clear()
         writeBuffers.clear()
         subscribedDevices.clear()
-        deviceAddressToPeerId.clear()
+        deviceAddressToPeerIds.clear()
 
         gattServer?.close()
         gattServer = null
@@ -320,17 +320,23 @@ class BLEMeshService(
             writeQueues.remove(addr)
             writeBuffers.remove(addr)
             
-            val peerId = deviceAddressToPeerId[addr]
-            if (peerId != null) {
-                val stillConnected = centralConns.keys.any { deviceAddressToPeerId[it] == peerId } ||
-                                     peripheralConns.any { deviceAddressToPeerId[it] == peerId }
-                if (!stillConnected) {
-                    Log.i(TAG, "  Peer $peerId marked disconnected (all paths gone)")
-                    peerRegistry.setConnected(peerId, false)
-                    eventListener?.onPeerDisconnected(peerId)
+            val peerIds = deviceAddressToPeerIds.remove(addr)
+            if (peerIds != null) {
+                var listUpdated = false
+                peerIds.forEach { peerId ->
+                    val stillConnected = centralConns.keys.any { deviceAddressToPeerIds[it]?.contains(peerId) == true } ||
+                                         peripheralConns.any { deviceAddressToPeerIds[it]?.contains(peerId) == true }
+                    if (!stillConnected) {
+                        Log.i(TAG, "  Peer $peerId marked disconnected (all paths gone)")
+                        peerRegistry.setConnected(peerId, false)
+                        eventListener?.onPeerDisconnected(peerId)
+                        listUpdated = true
+                    } else {
+                        Log.d(TAG, "  Peer $peerId remains connected on another path")
+                    }
+                }
+                if (listUpdated) {
                     eventListener?.onPeerListUpdated(peerRegistry.all())
-                } else {
-                    Log.d(TAG, "  Peer $peerId remains connected on another path")
                 }
             }
         }
@@ -373,11 +379,17 @@ class BLEMeshService(
             Log.i(TAG, "GATT server: device ${device.address} → $stateStr (status=$status)")
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 peripheralConns.add(device.address)
-                val knownPeerId = deviceAddressToPeerId[device.address]
-                if (knownPeerId != null) {
-                    peerRegistry.setConnected(knownPeerId, true)
-                    eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
-                    eventListener?.onPeerListUpdated(peerRegistry.all())
+                val knownPeerIds = deviceAddressToPeerIds[device.address]
+                if (knownPeerIds != null) {
+                    var listUpdated = false
+                    knownPeerIds.forEach { knownPeerId ->
+                        peerRegistry.setConnected(knownPeerId, true)
+                        eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
+                        listUpdated = true
+                    }
+                    if (listUpdated) {
+                        eventListener?.onPeerListUpdated(peerRegistry.all())
+                    }
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 handleDisconnect(device.address, "peripheral")
@@ -482,11 +494,17 @@ class BLEMeshService(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     Log.i(TAG, "✅ GATT connected: ${gatt.device.address}  status=$status")
-                    val knownPeerId = deviceAddressToPeerId[gatt.device.address]
-                    if (knownPeerId != null) {
-                        peerRegistry.setConnected(knownPeerId, true)
-                        eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
-                        eventListener?.onPeerListUpdated(peerRegistry.all())
+                    val knownPeerIds = deviceAddressToPeerIds[gatt.device.address]
+                    if (knownPeerIds != null) {
+                        var listUpdated = false
+                        knownPeerIds.forEach { knownPeerId ->
+                            peerRegistry.setConnected(knownPeerId, true)
+                            eventListener?.onPeerConnected(knownPeerId, peerRegistry.nickname(knownPeerId))
+                            listUpdated = true
+                        }
+                        if (listUpdated) {
+                            eventListener?.onPeerListUpdated(peerRegistry.all())
+                        }
                     }
                     Log.i(TAG, "   → Requesting MTU=512 then discovering services…")
                     // Request maximum MTU before service discovery
@@ -719,7 +737,7 @@ class BLEMeshService(
         Log.i(TAG, "▶ Dispatch $typeName from $senderId (ttl=${packet.ttl})")
 
         // Map this MAC to the sender ID immediately to prevent spurious disconnects
-        deviceAddressToPeerId[fromDeviceAddress] = senderId
+        deviceAddressToPeerIds.computeIfAbsent(fromDeviceAddress) { ConcurrentHashMap.newKeySet() }.add(senderId)
 
         when (packet.type) {
             MessageType.ANNOUNCE         -> handleAnnounce(packet, fromDeviceAddress)
@@ -769,9 +787,8 @@ class BLEMeshService(
             lastSeenMs  = System.currentTimeMillis()
         ))
 
-        // Record the device-address → peerId mapping so that when this GATT
-        // connection drops we can mark exactly this peer as offline (not all peers).
-        deviceAddressToPeerId[fromDeviceAddress] = peerId
+        // Map this MAC to the sender ID
+        deviceAddressToPeerIds.computeIfAbsent(fromDeviceAddress) { ConcurrentHashMap.newKeySet() }.add(peerId)
 
         if (!wasConnected) {
             Log.i(TAG, "  → New peer registered: $peerId ($nickname)")
@@ -780,6 +797,7 @@ class BLEMeshService(
             Log.d(TAG, "  → Existing peer re-announced: $peerId ($nickname)")
         }
         eventListener?.onPeerListUpdated(peerRegistry.all())
+        if (packet.ttl > 1) relayPacket(packet)
     }
 
     private fun handlePublicMessage(packet: BitchatPacket) {
@@ -806,6 +824,7 @@ class BLEMeshService(
         peerRegistry.setConnected(peerId, false)
         eventListener?.onPeerDisconnected(peerId)
         eventListener?.onPeerListUpdated(peerRegistry.all())
+        if (packet.ttl > 1) relayPacket(packet)
     }
 
     private fun handleNoiseHandshake(packet: BitchatPacket) {

@@ -18,7 +18,7 @@ import {
   PermissionsAndroid,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useBitChat } from '../hooks/useBitChat';
 import { useConversations } from '../hooks/useConversations';
@@ -71,16 +71,30 @@ function BluetoothBanner({ state }: { state: string }) {
   );
 }
 
+function Avatar({ name, isConnected, size = 44 }: { name: string; isConnected: boolean; size?: number }) {
+  const initial = name ? name.charAt(0).toUpperCase() : '?';
+  const colorHash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hue = colorHash % 360;
+  return (
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: `hsl(${hue}, 60%, 40%)` }]}>
+      <Text style={[styles.avatarText, { fontSize: size * 0.45 }]}>{initial}</Text>
+      <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10b981' : '#64748b' }]} />
+    </View>
+  );
+}
+
 function MessageBubble({ item, myPeerId }: { item: Message; isOwn: boolean; myPeerId: string }) {
   const isOwn = item.senderId === myPeerId;
   const time = new Date(item.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
+  const colorHash = item.senderNickname.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hue = colorHash % 360;
   return (
     <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubblePeer]}>
       {!isOwn && (
-        <Text style={styles.bubbleSender}>{item.senderNickname}</Text>
+        <Text style={[styles.bubbleSender, { color: `hsl(${hue}, 80%, 75%)` }]}>{item.senderNickname}</Text>
       )}
       <Text style={[styles.bubbleText, isOwn && styles.bubbleTextOwn]}>
         {item.content}
@@ -104,10 +118,10 @@ function PeerRow({
   return (
     <TouchableOpacity
       style={styles.peerRow}
+      activeOpacity={0.7}
       onPress={onPress}>
-      <Text style={styles.peerDot}>{dot}</Text>
-
-      <View>
+      <Avatar name={peer.nickname} isConnected={peer.isConnected} size={46} />
+      <View style={{ marginLeft: 14, flex: 1 }}>
         <Text style={styles.peerNick}>{peer.nickname}</Text>
         <Text style={styles.peerId}>
           {peer.peerId.slice(0, 12)}…
@@ -143,8 +157,9 @@ function ChatRow({
   }
 
   return (
-    <TouchableOpacity style={styles.peerRow} onPress={onPress} onLongPress={onLongPress}>
-      <View style={styles.chatRowContent}>
+    <TouchableOpacity style={styles.peerRow} activeOpacity={0.7} onPress={onPress} onLongPress={onLongPress}>
+      <Avatar name={conv.nickname} isConnected={isConnected} size={50} />
+      <View style={[styles.chatRowContent, { marginLeft: 14 }]}>
         <View style={styles.chatRowHeader}>
           <Text style={styles.peerNick}>{conv.nickname}</Text>
           <Text style={styles.bubbleTime}>{timeStr}</Text>
@@ -153,9 +168,15 @@ function ChatRow({
           <Text style={styles.chatRowPreview} numberOfLines={1}>
             {conv.lastMessage ? conv.lastMessage : 'No messages yet'}
           </Text>
-          <Text style={styles.peerId}>
-            {dot} {status}
-          </Text>
+          <View style={styles.chatRowFooterRight}>
+            {conv.unreadCount && conv.unreadCount > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -170,6 +191,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
 
 export default function ChatScreen({ route, navigation }: Props) {
   const { nickname } = route.params;
+  const insets = useSafeAreaInsets();
   const [_permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionChecked, setPermissionChecked] = useState(false);
 
@@ -180,7 +202,7 @@ export default function ChatScreen({ route, navigation }: Props) {
       if (!granted) {
         Alert.alert(
           'Bluetooth Permission Required',
-          'BitChat needs Bluetooth to discover nearby peers. Please grant the permission and restart the app.',
+          'MeshChat needs Bluetooth to discover nearby peers. Please grant the permission and restart the app.',
         );
       } else {
         // Permissions confirmed — force a clean reinit so the mesh definitely
@@ -195,7 +217,7 @@ export default function ChatScreen({ route, navigation }: Props) {
   const { messages, peers, bluetoothState, myPeerId, sendMessage, clearMessages } =
     useBitChat({ nickname });
     
-  const { conversations, clearConversationPreview, deleteConversation } = useConversations(myPeerId);
+  const { conversations, clearConversationPreview, deleteConversation, markConversationAsRead } = useConversations(myPeerId);
 
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [searchQuery, setSearchQuery] = useState('');
@@ -219,10 +241,10 @@ export default function ChatScreen({ route, navigation }: Props) {
 
   if (!permissionChecked) {
     return (
-      <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#7C3AED" style={{ marginTop: 80 }} />
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <ActivityIndicator size="large" color="#8B5CF6" style={{ marginTop: 80 }} />
         <Text style={styles.loadingText}>Requesting permissions…</Text>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -234,13 +256,13 @@ export default function ChatScreen({ route, navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1a0533" />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#0B0410" />
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>⚡ BitChat</Text>
+          <Text style={styles.headerTitle}>⚡ MeshChat</Text>
           <Text style={styles.headerSub}>
             {connectedCount} peer{connectedCount !== 1 ? 's' : ''} nearby
           </Text>
@@ -288,6 +310,7 @@ export default function ChatScreen({ route, navigation }: Props) {
         {(['chat', 'chats', 'peers'] as Tab[]).map(tab => (
           <TouchableOpacity
             key={tab}
+            activeOpacity={0.7}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
             onPress={() => setActiveTab(tab)}>
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
@@ -314,7 +337,7 @@ export default function ChatScreen({ route, navigation }: Props) {
               <Text style={styles.emptySubtitle}>
                 {connectedCount > 0
                   ? `${connectedCount} peer${connectedCount > 1 ? 's' : ''} nearby — say hello!`
-                  : 'No peers in range yet. Move closer to another BitChat device.'}
+                  : 'No peers in range yet. Move closer to another MeshChat device.'}
               </Text>
             </View>
           ) : (
@@ -331,7 +354,7 @@ export default function ChatScreen({ route, navigation }: Props) {
           )}
 
           {/* Composer */}
-          <View style={styles.composer}>
+          <View style={[styles.composer, { paddingBottom: insets.bottom > 0 ? insets.bottom + 8 : 12 }]}>
             <TextInput
               style={styles.composerInput}
               value={input}
@@ -377,6 +400,7 @@ export default function ChatScreen({ route, navigation }: Props) {
                   conv={item}
                   isConnected={isConnected}
                   onPress={() => {
+                    markConversationAsRead(item.peerId);
                     navigation.navigate('PrivateChat', {
                       peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
                     });
@@ -389,6 +413,7 @@ export default function ChatScreen({ route, navigation }: Props) {
                         {
                           text: 'Open',
                           onPress: () => {
+                            markConversationAsRead(item.peerId);
                             navigation.navigate('PrivateChat', {
                               peer: { peerId: item.peerId, nickname: item.nickname, isConnected },
                             });
@@ -441,7 +466,7 @@ export default function ChatScreen({ route, navigation }: Props) {
                 />
               );
             }}
-            contentContainerStyle={styles.peerList}
+            contentContainerStyle={[styles.peerList, { paddingBottom: insets.bottom > 0 ? insets.bottom + 16 : 16 }]}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyIcon}>📭</Text>
@@ -473,43 +498,43 @@ export default function ChatScreen({ route, navigation }: Props) {
               }}
             />
           )}
-          contentContainerStyle={styles.peerList}
+          contentContainerStyle={[styles.peerList, { paddingBottom: insets.bottom > 0 ? insets.bottom + 16 : 16 }]}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>🔍</Text>
               <Text style={styles.emptyTitle}>Scanning for peers…</Text>
               <Text style={styles.emptySubtitle}>
-                Other BitChat devices within Bluetooth range will appear here.
+                Other MeshChat devices within Bluetooth range will appear here.
               </Text>
             </View>
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const PURPLE = '#7C3AED';
-const PURPLE2 = '#9F67FF';
-const BG = '#0f0221';
-const BG2 = '#1a0533';
-const CARD = '#23104a';
-const TEXT = '#f3f0ff';
-const MUTED = '#9ca3af';
+const PURPLE = '#8B5CF6';
+const PURPLE2 = '#A78BFA';
+const BG = '#0B0410';
+const BG2 = '#170B25';
+const CARD = '#1E1233';
+const TEXT = '#F8FAFC';
+const MUTED = '#94A3B8';
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, backgroundColor: BG },
 
   // Header
-  header: { backgroundColor: BG2, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' },
+  header: { backgroundColor: BG, paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' },
   headerText: { flex: 1 },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: PURPLE2, letterSpacing: 0.5 },
-  headerSub: { fontSize: 12, color: MUTED, marginTop: 2 },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: TEXT, letterSpacing: 0.5 },
+  headerSub: { fontSize: 13, color: MUTED, marginTop: 2 },
   menuBtn: { paddingHorizontal: 8, paddingVertical: 4 },
-  menuBtnText: { fontSize: 22, color: PURPLE2, fontWeight: '700' },
+  menuBtnText: { fontSize: 22, color: TEXT, fontWeight: '700' },
 
   // Banner
   banner: { backgroundColor: '#7c2d12', paddingHorizontal: 16, paddingVertical: 10 },
@@ -520,16 +545,16 @@ const styles = StyleSheet.create({
   searchInput: { backgroundColor: CARD, color: TEXT, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
 
   // Tabs
-  tabBar: { flexDirection: 'row', backgroundColor: BG2, borderBottomWidth: 1, borderBottomColor: '#2d1a4a' },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  tabBar: { flexDirection: 'row', backgroundColor: BG, borderBottomWidth: 1, borderBottomColor: '#2A1A4A' },
+  tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
   tabActive: { borderBottomWidth: 2, borderBottomColor: PURPLE },
-  tabText: { color: MUTED, fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: PURPLE2, fontSize: 13, fontWeight: '700' },
+  tabText: { color: MUTED, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: PURPLE, fontSize: 14, fontWeight: '800' },
 
   // Messages
-  messageList: { padding: 12, paddingBottom: 4 },
+  messageList: { padding: 16, paddingBottom: 8 },
   bubble: {
-    maxWidth: '80%', borderRadius: 16, padding: 12,
+    maxWidth: '82%', borderRadius: 18, padding: 14,
     marginBottom: 8, backgroundColor: CARD,
   },
   bubbleOwn: { alignSelf: 'flex-end', backgroundColor: PURPLE },
@@ -543,33 +568,39 @@ const styles = StyleSheet.create({
   // Composer
   composer: {
     flexDirection: 'row', alignItems: 'flex-end',
-    backgroundColor: BG2, padding: 10, borderTopWidth: 1, borderTopColor: '#2d1a4a',
+    backgroundColor: BG, padding: 12, borderTopWidth: 1, borderTopColor: '#2A1A4A',
   },
   composerInput: {
-    flex: 1, backgroundColor: CARD, borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 10, color: TEXT,
+    flex: 1, backgroundColor: CARD, borderRadius: 24,
+    paddingHorizontal: 16, paddingVertical: 12, color: TEXT,
     fontSize: 15, maxHeight: 120, marginRight: 10,
   },
   sendBtn: {
-    backgroundColor: PURPLE, borderRadius: 20,
-    paddingHorizontal: 18, paddingVertical: 12,
+    backgroundColor: PURPLE, borderRadius: 24,
+    paddingHorizontal: 18, paddingVertical: 14,
   },
   sendBtnDisabled: { backgroundColor: '#4b2080' },
-  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  // Peers
-  peerList: { padding: 12 },
+  // Peers & Chats
+  peerList: { padding: 16 },
   peerRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: CARD, borderRadius: 12, padding: 14, marginBottom: 8,
+    backgroundColor: CARD, borderRadius: 16, padding: 16, marginBottom: 12,
+    elevation: 2, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }
   },
-  peerDot: { fontSize: 16, marginRight: 12 },
-  peerNick: { color: TEXT, fontSize: 15, fontWeight: '600' },
-  peerId: { color: MUTED, fontSize: 11, marginTop: 2 },
+  avatar: { justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: '#FFF', fontWeight: '800' },
+  statusDot: { position: 'absolute', bottom: -4, right: -4, width: 16, height: 16, borderRadius: 8, borderWidth: 3, borderColor: CARD },
+  peerNick: { color: TEXT, fontSize: 16, fontWeight: '700' },
+  peerId: { color: MUTED, fontSize: 12, marginTop: 2 },
   chatRowContent: { flex: 1 },
-  chatRowHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  chatRowHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   chatRowFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatRowPreview: { color: MUTED, fontSize: 11, marginTop: 2, flex: 1, marginRight: 10 },
+  chatRowPreview: { color: MUTED, fontSize: 13, marginTop: 2, flex: 1, marginRight: 10 },
+  chatRowFooterRight: { flexDirection: 'row', alignItems: 'center' },
+  badge: { backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2, minWidth: 22, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
   // Empty states
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },

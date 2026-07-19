@@ -33,4 +33,5 @@ export interface Conversation {
   nickname: string;
   lastMessage?: string;
   lastMessageAt?: number;
+  unreadCount?: number;
 }

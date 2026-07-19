@@ -20,7 +20,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import type { Message } from '../types/chat';
@@ -59,6 +59,7 @@ function MessageBubble({
 
 export default function PrivateChatScreen({ route, navigation }: Props) {
   const { peer } = route.params;
+  const insets = useSafeAreaInsets();
 
   // Fetch our own peer ID once. Needed to distinguish sent vs received bubbles.
   const [myPeerId, setMyPeerId] = useState('');
@@ -88,8 +89,8 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
   }, [input, isSending, isConnected, sendMessage]);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1a0533" />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#0B0410" />
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <View style={styles.header}>
@@ -181,7 +182,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
         )}
 
         {/* ── Composer ─────────────────────────────────────────────────── */}
-        <View style={styles.composer}>
+        <View style={[styles.composer, { paddingBottom: insets.bottom > 0 ? insets.bottom + 8 : 12 }]}>
           <TextInput
             style={styles.composerInput}
             value={input}
@@ -191,7 +192,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
                 ? `Message ${peer.nickname}…`
                 : 'Peer is offline'
             }
-            placeholderTextColor="#6b7280"
+            placeholderTextColor="#94A3B8"
             multiline
             maxLength={1000}
             returnKeyType="send"
@@ -199,6 +200,7 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
             onSubmitEditing={handleSend}
           />
           <TouchableOpacity
+            activeOpacity={0.7}
             style={[
               styles.sendBtn,
               (!input.trim() || isSending || !isConnected) &&
@@ -214,19 +216,19 @@ export default function PrivateChatScreen({ route, navigation }: Props) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const PURPLE = '#7C3AED';
-const PURPLE2 = '#9F67FF';
-const BG = '#0f0221';
-const BG2 = '#1a0533';
-const CARD = '#23104a';
-const TEXT = '#f3f0ff';
-const MUTED = '#9ca3af';
+const PURPLE = '#8B5CF6';
+const PURPLE2 = '#A78BFA';
+const BG = '#0B0410';
+const BG2 = '#170B25';
+const CARD = '#1E1233';
+const TEXT = '#F8FAFC';
+const MUTED = '#94A3B8';
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
@@ -236,8 +238,8 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: BG2,
-    paddingHorizontal: 12,
+    backgroundColor: BG,
+    paddingHorizontal: 16,
     paddingVertical: 14,
   },
   backBtn: {
@@ -245,17 +247,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     marginRight: 8,
   },
-  backArrow: { fontSize: 24, color: PURPLE2 },
+  backArrow: { fontSize: 24, color: TEXT },
   headerCenter: { flex: 1 },
   menuBtn: { paddingHorizontal: 8, paddingVertical: 4 },
-  menuBtnText: { fontSize: 22, color: PURPLE2, fontWeight: '700' },
+  menuBtnText: { fontSize: 22, color: TEXT, fontWeight: '700' },
   peerName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     color: TEXT,
     letterSpacing: 0.3,
   },
-  peerMeta: { fontSize: 12, color: MUTED, marginTop: 2 },
+  peerMeta: { fontSize: 13, color: MUTED, marginTop: 2 },
 
   // Offline banner
   offlineBanner: {
@@ -270,11 +272,11 @@ const styles = StyleSheet.create({
   },
 
   // Messages
-  messageList: { padding: 12, paddingBottom: 4 },
+  messageList: { padding: 16, paddingBottom: 8 },
   bubble: {
-    maxWidth: '80%',
-    borderRadius: 16,
-    padding: 12,
+    maxWidth: '82%',
+    borderRadius: 18,
+    padding: 14,
     marginBottom: 8,
     backgroundColor: CARD,
   },
@@ -289,17 +291,18 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: BG2,
-    padding: 10,
+    backgroundColor: BG,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#2d1a4a',
+    borderTopColor: '#2A1A4A',
   },
   composerInput: {
     flex: 1,
     backgroundColor: CARD,
-    borderRadius: 20,
+    borderRadius: 24,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     color: TEXT,
     fontSize: 15,
     maxHeight: 120,
@@ -307,12 +310,12 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     backgroundColor: PURPLE,
-    borderRadius: 20,
+    borderRadius: 24,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   sendBtnDisabled: { backgroundColor: '#4b2080' },
-  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   // Empty state
   empty: {

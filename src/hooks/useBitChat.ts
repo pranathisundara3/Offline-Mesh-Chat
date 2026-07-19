@@ -90,12 +90,14 @@ export function useBitChat({ nickname }: UseBitChatOptions): UseBitChatReturn {
         if (seenIds.current.has(msg.id)) return;
         seenIds.current.add(msg.id);
 
-        setMessages(prev => {
-          const next = [...prev, msg];
-          // Pure updater — no side effects.
-          // Persistence is handled by the useEffect below.
-          return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
-        });
+        if (!msg.isPrivate) {
+          setMessages(prev => {
+            const next = [...prev, msg];
+            // Pure updater — no side effects.
+            // Persistence is handled by the useEffect below.
+            return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
+          });
+        }
 
         // --- Notification Logic ---
         // 1. Do not notify for my own messages.
